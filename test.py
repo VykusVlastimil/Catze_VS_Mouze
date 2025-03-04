@@ -8,20 +8,19 @@ WIDTH, HEIGHT = 1920, 1020
 BG_COLOR = (30, 30, 30)
 RAT_COLOR = (200, 200, 200)
 ENEMY_COLOR = (255, 0, 0)
-VISION_COLOR = (255, 255, 100, 120)  # Průhledný kužel
+VISION_COLOR = (255, 255, 100, 120)  # Semi-transparent yellow
 WALL_COLOR = (100, 100, 100)
 WALL_OUTLINE_COLOR = (150, 150, 150)
-DOOR_COLOR = (139, 69, 19)  # Hnědá barva dveří
+DOOR_COLOR = (139, 69, 19)
 SPEED = 3
 ENEMY_SPEED = 2.5
-VISION_ANGLE = 120
-VISION_LENGTH = 400
-PERIPHERAL_RADIUS = 50
+VISION_RADIUS = 300
 PLAYER_SIZE = 20
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Mouse-Cat Game")
 clock = pygame.time.Clock()
+font = pygame.font.Font(None, 36)
 
 class Rat:
     def __init__(self, x, y):
@@ -30,14 +29,13 @@ class Rat:
         self.angle = 0
         self.image = pygame.Surface((20, 10), pygame.SRCALPHA)
         pygame.draw.ellipse(self.image, RAT_COLOR, (0, 0, 20, 10))
-        self.rect = pygame.Rect(x - 10, y - 5, 20, 10)  # Hitbox
+        self.rect = pygame.Rect(x - 10, y - 5, 20, 10)
 
     def update(self, walls):
         mouse_x, mouse_y = pygame.mouse.get_pos()
         dx, dy = mouse_x - self.x, mouse_y - self.y
         self.angle = math.degrees(math.atan2(dy, dx))
 
-        # Pohyb relativní k rotaci
         move_vec = [0, 0]
         keys = pygame.key.get_pressed()
         rad_angle = math.radians(self.angle)
@@ -48,27 +46,20 @@ class Rat:
         if keys[pygame.K_s]:
             move_vec[0] -= math.cos(rad_angle) * SPEED
             move_vec[1] -= math.sin(rad_angle) * SPEED
-        if keys[pygame.K_a]:  # Strafe vlevo
+        if keys[pygame.K_a]:
             move_vec[0] += math.cos(rad_angle - math.pi / 2) * SPEED
             move_vec[1] += math.sin(rad_angle - math.pi / 2) * SPEED
-        if keys[pygame.K_d]:  # Strafe vpravo
+        if keys[pygame.K_d]:
             move_vec[0] += math.cos(rad_angle + math.pi / 2) * SPEED
             move_vec[1] += math.sin(rad_angle + math.pi / 2) * SPEED
 
-        # Kolize se zdmi
         new_x = self.x + move_vec[0]
         new_y = self.y + move_vec[1]
         self.rect.center = (new_x, new_y)
 
-        collision = False
-        for wall in walls:
-            if self.rect.colliderect(wall.rect):
-                collision = True
-                break
-
+        collision = any(self.rect.colliderect(wall.rect) for wall in walls)
         if not collision:
-            self.x = new_x
-            self.y = new_y
+            self.x, self.y = new_x, new_y
         else:
             self.rect.center = (self.x, self.y)
 
@@ -76,49 +67,6 @@ class Rat:
         rotated_image = pygame.transform.rotate(self.image, -self.angle)
         new_rect = rotated_image.get_rect(center=(self.x, self.y))
         screen.blit(rotated_image, new_rect.topleft)
-        self.draw_vision(screen)
-
-    def draw_vision(self, screen):
-        left_angle = self.angle - VISION_ANGLE / 2
-        right_angle = self.angle + VISION_ANGLE / 2
-        left_x = self.x + math.cos(math.radians(left_angle)) * VISION_LENGTH
-        left_y = self.y + math.sin(math.radians(left_angle)) * VISION_LENGTH
-        right_x = self.x + math.cos(math.radians(right_angle)) * VISION_LENGTH
-        right_y = self.y + math.sin(math.radians(right_angle)) * VISION_LENGTH
-        left_x, left_y = self.clip_vision(self.x, self.y, left_x, left_y)
-        right_x, right_y = self.clip_vision(self.x, self.y, right_x, right_y)
-        pygame.draw.polygon(screen, VISION_COLOR, [(self.x, self.y), (left_x, left_y), (right_x, right_y)])
-        pygame.draw.circle(screen, VISION_COLOR, (int(self.x), int(self.y)), PERIPHERAL_RADIUS, width=1)
-
-    def clip_vision(self, start_x, start_y, end_x, end_y):
-        for wall in walls:
-            intersection = self.line_rect_intersection(start_x, start_y, end_x, end_y, wall.rect)
-            if intersection:
-                end_x, end_y = intersection
-        return end_x, end_y
-
-    def line_rect_intersection(self, x1, y1, x2, y2, rect):
-        edges = [
-            ((rect.left, rect.top), (rect.right, rect.top)),
-            ((rect.right, rect.top), (rect.right, rect.bottom)),
-            ((rect.right, rect.bottom), (rect.left, rect.bottom)),
-            ((rect.left, rect.bottom), (rect.left, rect.top))
-        ]
-        for edge in edges:
-            intersect = self.line_line_intersection(x1, y1, x2, y2, edge[0][0], edge[0][1], edge[1][0], edge[1][1])
-            if intersect:
-                return intersect
-        return None
-
-    def line_line_intersection(self, x1, y1, x2, y2, x3, y3, x4, y4):
-        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if denom == 0:
-            return None
-        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-        u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
-        if 0 <= t <= 1 and 0 <= u <= 1:
-            return int(x1 + t * (x2 - x1)), int(y1 + t * (y2 - y1))
-        return None
 
 class Enemy:
     def __init__(self, x, y):
@@ -143,11 +91,7 @@ class Enemy:
     def can_see_rat(self, rat, walls):
         dx, dy = rat.x - self.x, rat.y - self.y
         distance = math.hypot(dx, dy)
-        if distance > VISION_LENGTH:
-            return False
-        angle = math.degrees(math.atan2(dy, dx))
-        angle_diff = abs((angle - self.angle) % 360)
-        if angle_diff > VISION_ANGLE / 2 and angle_diff < 360 - VISION_ANGLE / 2:
+        if distance > VISION_RADIUS:
             return False
         for wall in walls:
             if self.line_rect_intersection(self.x, self.y, rat.x, rat.y, wall.rect):
@@ -162,23 +106,18 @@ class Enemy:
             new_x = self.x + math.cos(math.radians(self.angle)) * self.speed
             new_y = self.y + math.sin(math.radians(self.angle)) * self.speed
             if not self.check_collision(new_x, new_y, walls):
-                self.x = new_x
-                self.y = new_y
+                self.x, self.y = new_x, new_y
 
     def wander(self):
         self.angle += random.uniform(-10, 10)
         new_x = self.x + math.cos(math.radians(self.angle)) * self.speed
         new_y = self.y + math.sin(math.radians(self.angle)) * self.speed
         if not self.check_collision(new_x, new_y, walls):
-            self.x = new_x
-            self.y = new_y
+            self.x, self.y = new_x, new_y
 
     def check_collision(self, x, y, walls):
-        enemy_rect = pygame.Rect(x - 10, y - 5, 20, 10)
-        for wall in walls:
-            if enemy_rect.colliderect(wall.rect):
-                return True
-        return False
+        temp_rect = pygame.Rect(x - 10, y - 5, 20, 10)
+        return any(temp_rect.colliderect(wall.rect) for wall in walls)
 
     def draw(self, screen):
         rotated_image = pygame.transform.rotate(self.image, -self.angle)
@@ -189,72 +128,132 @@ class Wall:
     def __init__(self, x, y, width, height):
         self.rect = pygame.Rect(x, y, width, height)
 
-    def draw(self, screen, rat):
-        if self.is_visible(rat):
+    def draw(self, screen, mouse_pos):
+        if self.is_visible(mouse_pos):
             pygame.draw.rect(screen, WALL_OUTLINE_COLOR, self.rect, 2)
 
-    def is_visible(self, rat):
-        dx, dy = self.rect.centerx - rat.x, self.rect.centery - rat.y
-        distance = math.hypot(dx, dy)
-        if distance > VISION_LENGTH:
-            return False
-        angle = math.degrees(math.atan2(dy, dx))
-        angle_diff = abs((angle - rat.angle) % 360)
-        if angle_diff > VISION_ANGLE / 2 and angle_diff < 360 - VISION_ANGLE / 2:
-            return False
-        return True
+    def is_visible(self, mouse_pos):
+        closest_x = max(self.rect.left, min(mouse_pos[0], self.rect.right))
+        closest_y = max(self.rect.top, min(mouse_pos[1], self.rect.bottom))
+        distance = math.hypot(mouse_pos[0]-closest_x, mouse_pos[1]-closest_y)
+        return distance <= VISION_RADIUS
 
 class Door:
     def __init__(self, x, y, width, height):
         self.rect = pygame.Rect(x, y, width, height)
         self.is_open = False
 
-    def draw(self, screen):
-        color = DOOR_COLOR if not self.is_open else (0, 0, 0, 0)  # Otevřené dveře jsou průhledné
-        pygame.draw.rect(screen, color, self.rect)
+    def draw(self, screen, mouse_pos):
+        if self.is_visible(mouse_pos):
+            color = DOOR_COLOR if not self.is_open else (0, 0, 0, 0)
+            pygame.draw.rect(screen, color, self.rect)
 
-    def toggle(self):
-        self.is_open = not self.is_open
+    def is_visible(self, mouse_pos):
+        closest_x = max(self.rect.left, min(mouse_pos[0], self.rect.right))
+        closest_y = max(self.rect.top, min(mouse_pos[1], self.rect.bottom))
+        distance = math.hypot(mouse_pos[0]-closest_x, mouse_pos[1]-closest_y)
+        return distance <= VISION_RADIUS
 
-# Místnost s dveřmi v levém dolním rohu
-walls = [
-    Wall(200, 100, 20, 800),
-    Wall(200, 100, 1600, 20),
-    Wall(1800, 100, 20, 800),
-    Wall(200, 900, 1600, 20),
-    Wall(500, 300, 20, 400),
-    Wall(800, 100, 20, 400),
-    Wall(1100, 300, 20, 400),
-    Wall(1400, 100, 20, 400),
-    Wall(300, 500, 400, 20),
-    Wall(900, 500, 400, 20),
-    Wall(1300, 500, 400, 20),
+# Level configurations
+levels = [
+    {  # Level 1
+        'walls': [
+            Wall(200, 100, 20, 800),
+            Wall(200, 100, 1600, 20),
+            Wall(1800, 100, 20, 800),
+            Wall(200, 900, 1600, 20),
+            Wall(500, 300, 20, 400),
+            Wall(800, 100, 20, 400),
+            Wall(1100, 300, 20, 400),
+            Wall(1400, 100, 20, 400),
+            Wall(300, 500, 400, 20),
+            Wall(900, 500, 400, 20),
+            Wall(1300, 500, 400, 20),
+        ],
+        'door': Door(100, 900, 100, 20),
+        'enemies': [Enemy(700, 200)],
+        'rat_start': (200, 200)
+    },
+    {  # Level 2
+        'walls': [
+            Wall(200, 100, 20, 800),
+            Wall(200, 100, 1600, 20),
+            Wall(1800, 100, 20, 800),
+            Wall(200, 900, 1600, 20),
+            Wall(600, 300, 20, 400),
+            Wall(900, 100, 20, 400),
+            Wall(1200, 300, 20, 400),
+            Wall(1500, 100, 20, 400),
+            Wall(400, 500, 400, 20),
+            Wall(1000, 500, 400, 20),
+            Wall(1400, 500, 400, 20),
+        ],
+        'door': Door(1800, 100, 100, 20),
+        'enemies': [Enemy(1600, 500), Enemy(1000, 300)],
+        'rat_start': (200, 200)
+    }
 ]
 
-door = Door(100, 900, 100, 20)  # Dveře v levém dolním rohu
+current_level = 0
+start_ticks = pygame.time.get_ticks()
 
-rat = Rat(100, 100)
-enemy = Enemy(random.randint(100, 300), random.randint(100, 300))
+def load_level(level_index):
+    level = levels[level_index]
+    return (level['walls'],
+            level['door'],
+            level['enemies'],
+            level['rat_start'])
+
+walls, door, enemies, rat_start = load_level(current_level)
+rat = Rat(*rat_start)
 
 running = True
 while running:
     screen.fill(BG_COLOR)
+    mouse_pos = pygame.mouse.get_pos()
+    
+    # Draw vision circle
+    vision_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    pygame.draw.circle(vision_surface, VISION_COLOR, mouse_pos, VISION_RADIUS)
+    screen.blit(vision_surface, (0, 0))
+    
+    # Timer logic
+    current_ticks = pygame.time.get_ticks()
+    elapsed = (current_ticks - start_ticks) / 1000
+    remaining = max(60 - elapsed, 0)
+    timer_text = font.render(f"Time: {int(remaining)}", True, (255, 255, 255))
+    
+    if remaining <= 0:
+        running = False
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
         if event.type == pygame.MOUSEBUTTONDOWN:
-            if door.rect.collidepoint(event.pos):  # Kliknutí na dveře
+            if door.rect.collidepoint(event.pos):
                 door.toggle()
 
     rat.update(walls)
     rat.draw(screen)
 
-    enemy.update(rat, walls)
-    enemy.draw(screen)
+    for enemy in enemies:
+        enemy.update(rat, walls)
+        enemy.draw(screen)
 
     for wall in walls:
-        wall.draw(screen, rat)
-    door.draw(screen)  # Vykreslení dveří
+        wall.draw(screen, mouse_pos)
+
+    door.draw(screen, mouse_pos)
+    screen.blit(timer_text, (10, 10))
+
+    if door.is_open and rat.rect.colliderect(door.rect):
+        current_level += 1
+        if current_level < len(levels):
+            walls, door, enemies, rat_start = load_level(current_level)
+            rat = Rat(*rat_start)
+            start_ticks = pygame.time.get_ticks()
+        else:
+            running = False
 
     pygame.display.flip()
     clock.tick(60)
