@@ -1,257 +1,186 @@
 import pygame
 import math
-import random
 
 pygame.init()
 
+# Game Constants
 WIDTH, HEIGHT = 1920, 1020
 BG_COLOR = (30, 30, 30)
 RAT_COLOR = (200, 200, 200)
-ENEMY_COLOR = (255, 0, 0)
-VISION_COLOR = (255, 255, 100, 80)
-WALL_COLOR = (100, 100, 100)
-WALL_OUTLINE_COLOR = (150, 150, 150)
-SPEED = 3
-ENEMY_SPEED = 2.5
-VISION_ANGLE = 120  # Wider vision cone
-VISION_LENGTH = 400  # Longer vision cone
-PERIPHERAL_RADIUS = 50
+VISION_RADIUS = 150
+FOG_ALPHA = 200
+SPEED = 6
+MAZE_SCALE = 3  # Increased scale for bigger maze
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Mouse-Cat Game")
+pygame.display.set_caption("Giant Mouse Maze")
 clock = pygame.time.Clock()
+font = pygame.font.Font(None, 48)
 
-class Rat:
+class Player:
     def __init__(self, x, y):
         self.x = x
         self.y = y
         self.angle = 0
-        self.image = pygame.Surface((20, 10), pygame.SRCALPHA)
-        pygame.draw.ellipse(self.image, RAT_COLOR, (0, 0, 20, 10))
+        self.rect = pygame.Rect(x-25, y-15, 50, 30)
+        self.image = self.create_mouse_image()
+    
+    def create_mouse_image(self):
+        mouse_surface = pygame.Surface((50, 30), pygame.SRCALPHA)
+        # Body
+        pygame.draw.ellipse(mouse_surface, RAT_COLOR, (5, 5, 40, 20))
+        # Ears
+        pygame.draw.circle(mouse_surface, RAT_COLOR, (15, 8), 6)
+        pygame.draw.circle(mouse_surface, RAT_COLOR, (35, 8), 6)
+        # Tail
+        pygame.draw.polygon(mouse_surface, RAT_COLOR, [
+            (45, 15), (50, 13), (55, 15), (50, 17)
+        ])
+        # Feet
+        pygame.draw.circle(mouse_surface, RAT_COLOR, (15, 25), 4)
+        pygame.draw.circle(mouse_surface, RAT_COLOR, (35, 25), 4)
+        return mouse_surface
 
-    def update(self):
-        # Update angle to face the cursor
+    def update(self, walls):
         mouse_x, mouse_y = pygame.mouse.get_pos()
         dx, dy = mouse_x - self.x, mouse_y - self.y
         self.angle = math.degrees(math.atan2(dy, dx))
-
-        # Movement with WASD
+        
         keys = pygame.key.get_pressed()
+        move_vec = [0, 0]
+        rad_angle = math.radians(self.angle)
+
         if keys[pygame.K_w]:
-            self.y -= SPEED
+            move_vec[0] += math.cos(rad_angle) * SPEED
+            move_vec[1] += math.sin(rad_angle) * SPEED
         if keys[pygame.K_s]:
-            self.y += SPEED
+            move_vec[0] -= math.cos(rad_angle) * SPEED
+            move_vec[1] -= math.sin(rad_angle) * SPEED
         if keys[pygame.K_a]:
-            self.x -= SPEED
+            move_vec[0] += math.cos(rad_angle - math.pi/2) * SPEED
+            move_vec[1] += math.sin(rad_angle - math.pi/2) * SPEED
         if keys[pygame.K_d]:
-            self.x += SPEED
+            move_vec[0] += math.cos(rad_angle + math.pi/2) * SPEED
+            move_vec[1] += math.sin(rad_angle + math.pi/2) * SPEED
+
+        new_x = self.x + move_vec[0]
+        new_y = self.y + move_vec[1]
+        self.rect.center = (new_x, new_y)
+        
+        if not any(self.rect.colliderect(w.rect) for w in walls):
+            self.x, self.y = new_x, new_y
 
     def draw(self, screen):
-        rotated_image = pygame.transform.rotate(self.image, -self.angle)
-        new_rect = rotated_image.get_rect(center=(self.x, self.y))
-        screen.blit(rotated_image, new_rect.topleft)
-        self.draw_vision(screen)
-
-    def draw_vision(self, screen):
-        left_angle = self.angle - VISION_ANGLE // 2
-        right_angle = self.angle + VISION_ANGLE // 2
-        left_x = self.x + math.cos(math.radians(left_angle)) * VISION_LENGTH
-        left_y = self.y + math.sin(math.radians(left_angle)) * VISION_LENGTH
-        right_x = self.x + math.cos(math.radians(right_angle)) * VISION_LENGTH
-        right_y = self.y + math.sin(math.radians(right_angle)) * VISION_LENGTH
-        left_x, left_y = self.clip_vision(self.x, self.y, left_x, left_y)
-        right_x, right_y = self.clip_vision(self.x, self.y, right_x, right_y)
-        pygame.draw.polygon(screen, VISION_COLOR, [(self.x, self.y), (left_x, left_y), (right_x, right_y)])
-        pygame.draw.circle(screen, VISION_COLOR, (int(self.x), int(self.y)), PERIPHERAL_RADIUS, width=1)
-
-    def clip_vision(self, start_x, start_y, end_x, end_y):
-        for wall in walls:
-            intersection = self.line_rect_intersection(start_x, start_y, end_x, end_y, wall.rect)
-            if intersection:
-                end_x, end_y = intersection
-        return end_x, end_y
-
-    def line_rect_intersection(self, x1, y1, x2, y2, rect):
-        edges = [
-            ((rect.left, rect.top), (rect.right, rect.top)),
-            ((rect.right, rect.top), (rect.right, rect.bottom)),
-            ((rect.right, rect.bottom), (rect.left, rect.bottom)),
-            ((rect.left, rect.bottom), (rect.left, rect.top))
-        ]
-        for edge in edges:
-            intersect = self.line_line_intersection(x1, y1, x2, y2, edge[0][0], edge[0][1], edge[1][0], edge[1][1])
-            if intersect:
-                return intersect
-        return None
-
-    def line_line_intersection(self, x1, y1, x2, y2, x3, y3, x4, y4):
-        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if denom == 0:
-            return None
-        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-        u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
-        if 0 <= t <= 1 and 0 <= u <= 1:
-            return int(x1 + t * (x2 - x1)), int(y1 + t * (y2 - y1))
-        return None
-
-class Enemy:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.angle = 0
-        self.speed = ENEMY_SPEED
-        self.image = pygame.Surface((20, 10), pygame.SRCALPHA)
-        pygame.draw.ellipse(self.image, ENEMY_COLOR, (0, 0, 20, 10))
-        self.target = None
-
-    def update(self, rat, walls):
-        if self.can_see_rat(rat):
-            self.target = (rat.x, rat.y)
-        else:
-            self.target = None
-            self.wander()
-
-        if self.target:
-            self.move_towards_target(walls)
-
-    def can_see_rat(self, rat):
-        dx, dy = rat.x - self.x, rat.y - self.y
-        distance = math.hypot(dx, dy)
-        if distance > VISION_LENGTH:
-            return False
-        angle = math.degrees(math.atan2(dy, dx))
-        angle_diff = abs((angle - self.angle) % 360)
-        if angle_diff > VISION_ANGLE / 2 and angle_diff < 360 - VISION_ANGLE / 2:
-            return False
-        return True
-
-    def move_towards_target(self, walls):
-        dx, dy = self.target[0] - self.x, self.target[1] - self.y
-        distance = math.hypot(dx, dy)
-        if distance > 0:
-            self.angle = math.degrees(math.atan2(dy, dx))
-            new_x = self.x + math.cos(math.radians(self.angle)) * self.speed
-            new_y = self.y + math.sin(math.radians(self.angle)) * self.speed
-            if not self.check_collision(new_x, new_y, walls):
-                self.x = new_x
-                self.y = new_y
-
-    def wander(self):
-        self.angle += random.uniform(-10, 10)
-        new_x = self.x + math.cos(math.radians(self.angle)) * self.speed
-        new_y = self.y + math.sin(math.radians(self.angle)) * self.speed
-        if not self.check_collision(new_x, new_y, walls):
-            self.x = new_x
-            self.y = new_y
-
-    def check_collision(self, x, y, walls):
-        enemy_rect = pygame.Rect(x - 10, y - 5, 20, 10)
-        for wall in walls:
-            if enemy_rect.colliderect(wall.rect):
-                return True
-        return False
-
-    def draw(self, screen):
-        rotated_image = pygame.transform.rotate(self.image, -self.angle)
-        new_rect = rotated_image.get_rect(center=(self.x, self.y))
-        screen.blit(rotated_image, new_rect.topleft)
-        self.draw_vision(screen)
-
-    def draw_vision(self, screen):
-        left_angle = self.angle - VISION_ANGLE // 2
-        right_angle = self.angle + VISION_ANGLE // 2
-        left_x = self.x + math.cos(math.radians(left_angle)) * VISION_LENGTH
-        left_y = self.y + math.sin(math.radians(left_angle)) * VISION_LENGTH
-        right_x = self.x + math.cos(math.radians(right_angle)) * VISION_LENGTH
-        right_y = self.y + math.sin(math.radians(right_angle)) * VISION_LENGTH
-        left_x, left_y = self.clip_vision(self.x, self.y, left_x, left_y)
-        right_x, right_y = self.clip_vision(self.x, self.y, right_x, right_y)
-        pygame.draw.polygon(screen, VISION_COLOR, [(self.x, self.y), (left_x, left_y), (right_x, right_y)])
-        pygame.draw.circle(screen, VISION_COLOR, (int(self.x), int(self.y)), PERIPHERAL_RADIUS, width=1)
-
-    def clip_vision(self, start_x, start_y, end_x, end_y):
-        for wall in walls:
-            intersection = self.line_rect_intersection(start_x, start_y, end_x, end_y, wall.rect)
-            if intersection:
-                end_x, end_y = intersection
-        return end_x, end_y
-
-    def line_rect_intersection(self, x1, y1, x2, y2, rect):
-        edges = [
-            ((rect.left, rect.top), (rect.right, rect.top)),
-            ((rect.right, rect.top), (rect.right, rect.bottom)),
-            ((rect.right, rect.bottom), (rect.left, rect.bottom)),
-            ((rect.left, rect.bottom), (rect.left, rect.top))
-        ]
-        for edge in edges:
-            intersect = self.line_line_intersection(x1, y1, x2, y2, edge[0][0], edge[0][1], edge[1][0], edge[1][1])
-            if intersect:
-                return intersect
-        return None
-
-    def line_line_intersection(self, x1, y1, x2, y2, x3, y3, x4, y4):
-        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
-        if denom == 0:
-            return None
-        t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-        u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
-        if 0 <= t <= 1 and 0 <= u <= 1:
-            return int(x1 + t * (x2 - x1)), int(y1 + t * (y2 - y1))
-        return None
+        rotated_img = pygame.transform.rotate(self.image, -self.angle)
+        screen.blit(rotated_img, rotated_img.get_rect(center=(self.x, self.y)))
 
 class Wall:
-    def __init__(self, x, y, width, height):
-        self.rect = pygame.Rect(x, y, width, height)
+    def __init__(self, x, y, w, h, color=(100, 100, 100)):
+        self.rect = pygame.Rect(x*MAZE_SCALE, y*MAZE_SCALE, w*MAZE_SCALE, h*MAZE_SCALE)
+        self.color = color
+    
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color, self.rect)
 
-    def draw(self, screen, rat):
-        if self.is_visible(rat):
-            pygame.draw.rect(screen, WALL_OUTLINE_COLOR, self.rect, 2)
-
-    def is_visible(self, rat):
-        dx, dy = self.rect.centerx - rat.x, self.rect.centery - rat.y
-        distance = math.hypot(dx, dy)
-        if distance > VISION_LENGTH:
-            return False
-        angle = math.degrees(math.atan2(dy, dx))
-        angle_diff = abs((angle - rat.angle) % 360)
-        if angle_diff > VISION_ANGLE / 2 and angle_diff < 360 - VISION_ANGLE / 2:
-            return False
-        return True
-
-walls = [
-    Wall(200, 100, 20, 800),
-    Wall(200, 100, 1600, 20),
-    Wall(1800, 100, 20, 800),
-    Wall(200, 900, 1600, 20),
-    Wall(500, 300, 20, 400),
-    Wall(800, 100, 20, 400),
-    Wall(1100, 300, 20, 400),
-    Wall(1400, 100, 20, 400),
-    Wall(300, 500, 400, 20),
-    Wall(900, 500, 400, 20),
-    Wall(1300, 500, 400, 20),
+# Expanded Maze Levels
+levels = [
+    {  # Level 1 - Giant Spiral
+        'walls': [
+            Wall(0, 0, 80, 5), Wall(0, 75, 80, 5),
+            Wall(0, 0, 5, 75), Wall(75, 0, 5, 75),
+            *[Wall(5 + i, 5 + i, 70 - 2*i, 5) for i in range(0, 35, 5)],
+            *[Wall(5 + i, 70 - i, 5, 65 - 2*i) for i in range(0, 35, 5)],
+            Wall(40, 40, 5, 30, (120, 80, 80))
+        ],
+        'start_pos': (100, 500),
+        'exit': Wall(70, 70, 5, 5),
+        'time': 15,
+        'wall_color': (100, 100, 150)
+    },
+    {  # Level 2 - Grid Labyrinth
+        'walls': [
+            Wall(0, 0, 80, 5), Wall(0, 75, 80, 5),
+            Wall(0, 0, 5, 75), Wall(75, 0, 5, 75),
+            *[Wall(x, y, 5, 20) for x in range(10, 70, 15) for y in range(5, 65, 25)],
+            *[Wall(x, y, 15, 5) for x in range(5, 65, 20) for y in range(20, 60, 20)],
+            Wall(35, 30, 5, 40, (80, 100, 80))
+        ],
+        'start_pos': (100, 100),
+        'exit': Wall(5, 70, 5, 5),
+        'time': 15,
+        'wall_color': (150, 100, 100)
+    },
+    {  # Level 3 - Forest Maze
+        'walls': [
+            Wall(0, 0, 80, 5), Wall(0, 75, 80, 5),
+            Wall(0, 0, 5, 75), Wall(75, 0, 5, 75),
+            *[Wall(random.randint(5, 70), random.randint(5, 70), 3, 15) for _ in range(40)],
+            *[Wall(random.randint(5, 70), random.randint(5, 70), 15, 3) for _ in range(40)],
+            Wall(40, 35, 5, 40, (80, 80, 100))
+        ],
+        'start_pos': (400, 800),
+        'exit': Wall(70, 5, 5, 5),
+        'time': 15,
+        'wall_color': (100, 150, 100)
+    }
 ]
 
-rat = Rat(100, 100)
-enemy = Enemy(random.randint(100, 300), random.randint(100, 300))  # Spawn near player
+def create_fog(player):
+    fog = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    fog.fill((0, 0, 0, FOG_ALPHA))
+    pygame.draw.circle(fog, (0, 0, 0, 0), (int(player.x), int(player.y)), VISION_RADIUS)
+    return fog
 
-running = True
-while running:
-    screen.fill(BG_COLOR)
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
+def main():
+    current_level = 0
+    level = levels[current_level]
+    player = Player(*level['start_pos'])
+    start_time = pygame.time.get_ticks()
+    
+    running = True
+    while running:
+        time_left = level['time'] - (pygame.time.get_ticks() - start_time) // 1000
+        
+        if time_left <= 0:
+            print("Time's up!")
             running = False
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+        
+        player.update(level['walls'])
+        
+        if player.rect.colliderect(level['exit'].rect):
+            current_level += 1
+            if current_level >= len(levels):
+                print("Congratulations! You escaped all levels!")
+                running = False
+            else:
+                level = levels[current_level]
+                player = Player(*level['start_pos'])
+                start_time = pygame.time.get_ticks()
+        
+        screen.fill(BG_COLOR)
+        for wall in level['walls']:
+            wall.draw(screen)
+        pygame.draw.rect(screen, (0, 255, 0), level['exit'].rect)
+        player.draw(screen)
+        
+        fog = create_fog(player)
+        screen.blit(fog, (0, 0))
+        
+        timer_text = font.render(
+            f"Level: {current_level+1} | Time: {time_left}",
+            True, 
+            (255, 0, 0) if time_left < 5 else (255, 255, 255)
+        )
+        screen.blit(timer_text, (20, 20))
+        
+        pygame.display.flip()
+        clock.tick(60)
+    
+    pygame.quit()
 
-    rat.update()
-    rat.draw(screen)
-
-    enemy.update(rat, walls)
-    enemy.draw(screen)
-
-    for wall in walls:
-        wall.draw(screen, rat)
-
-    pygame.display.flip()
-    clock.tick(60)
-
-pygame.quit()
+if __name__ == "__main__":
+    main()
